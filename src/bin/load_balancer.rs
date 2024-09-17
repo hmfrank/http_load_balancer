@@ -2,6 +2,7 @@ use core::net::SocketAddr;
 use http_load_balancer::read_http_request;
 use std::{collections::HashMap, env, io};
 use std::sync::{Arc, Mutex};
+use http_bytes::http::{HeaderMap, HeaderValue};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 
@@ -30,7 +31,7 @@ async fn main() -> io::Result<()> {
     let listener = TcpListener::bind(&lb_addr).await?;
     println!("[L] Listening on {}", lb_addr);
 
-    let mut next_server_index = 0;
+    let next_server_index = Arc::new(Mutex::new(0));
 
     loop {
         let (mut socket, client_address) = match listener.accept().await {
@@ -44,8 +45,9 @@ async fn main() -> io::Result<()> {
             }
         };
 
-        let server_address = server_addrs[next_server_index].clone();
-        next_server_index = (next_server_index + 1) % server_addrs.len();
+        let next_server_index = next_server_index.clone();
+        let server_addrs = server_addrs.clone(); // TODO: use reference
+        let db = db.clone();
 
         tokio::spawn(async move {
             let (request, bytes) = match read_http_request(&mut socket).await {
@@ -54,6 +56,31 @@ async fn main() -> io::Result<()> {
                     return;
                 }
                 Ok(x) => x,
+            };
+
+            let server_address = match get_session_id(
+                    request.headers(),
+                    "Cookie"
+                ) {
+                    Some(id) => {
+                        let sessions = db.lock().unwrap();
+
+                        if sessions.contains_key(id) {
+                            Some(sessions[id])
+                        } else {
+                            None
+                        }
+                    }
+                    None => None,
+                };
+            let server_address = match server_address {
+                Some(addr) => addr,
+                None => {
+                    let mut index = next_server_index.lock().unwrap();
+                    let addr = server_addrs[*index];
+                    *index = (*index + 1) % server_addrs.len();
+                    addr
+                }
             };
 
             if let Err(e) = handle_client(socket, client_address, server_address, &bytes).await {
@@ -65,6 +92,33 @@ async fn main() -> io::Result<()> {
             }
         });
     }
+}
+
+fn get_session_id<'a, 'b>(
+    headers: &'a HeaderMap<HeaderValue>,
+    header_name: &'b str
+) -> Option<&'a str> {
+    for header_val in headers.get_all(header_name).iter() {
+        let header_val = match header_val.to_str() {
+            Ok(val) => val,
+            Err(_) => {
+                continue;
+            }
+        };
+
+        for cookie in header_val.split(";").map(|s| s.trim()) {
+            if let Some(index) = cookie.find("=") {
+                let name = &cookie[0..index];
+                let value = &cookie[index..];
+
+                if name == "sessionID" {
+                    return Some(value);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 async fn handle_client(
