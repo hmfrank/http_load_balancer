@@ -1,8 +1,10 @@
 use core::net::SocketAddr;
-use http_load_balancer::{read_http_request_header, read_http_response_header};
+use http_load_balancer::{
+    get_session_id,
+    read_http_request_header, read_http_response_header
+};
 use std::{collections::HashMap, env, io};
 use std::sync::{Arc, Mutex};
-use http_bytes::http::{HeaderMap, HeaderValue};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 
@@ -58,6 +60,7 @@ async fn main() -> io::Result<()> {
                 Ok(x) => x,
             };
 
+            let mut create_db_entry = None;
             let server_address = match get_session_id(
                     request.headers(),
                     "Cookie"
@@ -68,22 +71,37 @@ async fn main() -> io::Result<()> {
                         if sessions.contains_key(id) {
                             Some(sessions[id])
                         } else {
+                            create_db_entry = Some(id);
                             None
                         }
                     }
                     None => None,
                 };
             let server_address = match server_address {
-                Some(addr) => addr,
+                Some(addr) => {
+                    println!("[L] Assigned client at {} to server at {} (sticky session).",
+                        client_address, addr
+                    );
+                    addr
+                },
                 None => {
                     let mut index = next_server_index.lock().unwrap();
                     let addr = server_addrs[*index];
                     *index = (*index + 1) % server_addrs.len();
+                    println!("[L] Assigned client at {} to server at {} (round robin).",
+                        client_address, addr
+                    );
                     addr
                 }
             };
 
-            if let Err(e) = handle_client(socket, client_address, server_address, &bytes, db).await {
+            if let Some(id) = create_db_entry {
+                let mut sessions = db.lock().unwrap();
+                sessions.insert(id.to_string(), server_address);
+                println!("[L] Unknown session ID. Added sticky session to DB: {} -> {}", id, server_address);
+            }
+
+            if let Err(e) = handle_client(socket, server_address, &bytes, db).await {
                 println!("[L] Failed to connect client {} to server {}. {:?}",
                          client_address,
                          server_address,
@@ -94,42 +112,13 @@ async fn main() -> io::Result<()> {
     }
 }
 
-fn get_session_id<'a, 'b>(
-    headers: &'a HeaderMap<HeaderValue>,
-    header_name: &'b str
-) -> Option<&'a str> {
-    for header_val in headers.get_all(header_name).iter() {
-        let header_val = match header_val.to_str() {
-            Ok(val) => val,
-            Err(_) => {
-                continue;
-            }
-        };
-
-        for cookie in header_val.split(";").map(|s| s.trim()) {
-            if let Some(index) = cookie.find("=") {
-                let name = &cookie[0..index];
-                let value = &cookie[index..];
-
-                if name == "sessionID" {
-                    return Some(value);
-                }
-            }
-        }
-    }
-
-    None
-}
-
 async fn handle_client(
     mut client_socket: TcpStream,
-    client_addr: SocketAddr,
     server_addr: SocketAddr,
     request_bytes: &[u8],
     db: Arc<Mutex<HashMap<String, SocketAddr>>>,
 ) -> io::Result<(u64, u64)> {
     let mut server_socket = TcpStream::connect(server_addr).await?;
-    println!("[L] Connected client at {} to server at {}.", client_addr, server_addr);
 
     server_socket.write_all(request_bytes).await?;
 
@@ -138,6 +127,7 @@ async fn handle_client(
     if let Some(id) = get_session_id(response.headers(), "Set-Cookie") {
         let mut sessions = db.lock().unwrap();
         sessions.insert(id.to_string(), server_addr);
+        println!("[L] Added sticky session to DB: {} -> {}", id, server_addr);
     }
 
     client_socket.write_all(bytes.as_slice()).await?;

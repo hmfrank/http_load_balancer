@@ -1,6 +1,6 @@
 use http_bytes::{
 	Error,
-	http::{Request, Response},
+	http::{Request, Response, HeaderMap, HeaderValue},
 	parse_request_header_easy, parse_response_header_easy,
 };
 use std::io;
@@ -12,6 +12,33 @@ trait RequestOrResponse {}
 impl<T> RequestOrResponse for Request<T> {}
 impl<T> RequestOrResponse for Response<T> {}
 
+
+pub fn get_session_id<'a, 'b>(
+	headers: &'a HeaderMap<HeaderValue>,
+	header_name: &'b str
+) -> Option<&'a str> {
+	for header_val in headers.get_all(header_name).iter() {
+		let header_val = match header_val.to_str() {
+			Ok(val) => val,
+			Err(_) => {
+				continue;
+			}
+		};
+
+		for cookie in header_val.split(";").map(|s| s.trim()) {
+			if let Some(index) = cookie.find("=") {
+				let name = &cookie[0..index];
+				let value = &cookie[index + 1..];
+
+				if name == "sessionID" {
+					return Some(value);
+				}
+			}
+		}
+	}
+
+	None
+}
 
 pub async fn read_http_request_header(socket: &mut TcpStream)
 	-> io::Result<(Request<()>, Vec<u8>)> {
