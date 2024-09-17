@@ -1,10 +1,8 @@
-use http_bytes::{
-    http::{Response, StatusCode},
-    response_header_to_vec, parse_request_header_easy
-};
+use http_bytes::{http::{Response, StatusCode}, response_header_to_vec};
+use http_load_balancer::read_http_request;
 use std::env;
 use std::io;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpListener, TcpStream};
 
 
@@ -24,47 +22,28 @@ async fn main() -> io::Result<()> {
     println!("[S] Listening on {}", addr);
 
     loop {
-        match listener.accept().await {
-            Ok((socket, client_address)) => {
-                println!("[S] New connection to {}", client_address);
-
-                let addr = addr.clone();
-                tokio::spawn(async move {
-                    if let Err(e) = handle_client(socket, &addr).await {
-                        println!("[S] Failed to handle client at {}. {:?}", client_address, e);
-                    }
-                });
-            }
+        let (socket, client_address) = match listener.accept().await {
             Err(e) => {
                 println!("[S] Failed to accept client. {:?}", e);
+                continue;
+            }
+            Ok((s, addr)) => {
+                println!("[S] New connection to {}", addr);
+                (s, addr)
             }
         };
+
+        let addr = addr.clone();
+        tokio::spawn(async move {
+            if let Err(e) = handle_client(socket, &addr).await {
+                println!("[S] Failed to handle client at {}. {:?}", client_address, e);
+            }
+        });
     }
 }
 
 async fn handle_client(mut socket: TcpStream, listen_addr: &str) -> io::Result<()> {
-    let mut buffer = vec![0; 4096];
-    let mut request_bytes = vec![];
-
-    let request = loop {
-        let n = socket.read(buffer.as_mut_slice()).await?;
-        if n == 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::ConnectionReset,
-                "socket.read() returned 0"
-            ));
-        }
-
-        request_bytes.extend_from_slice(&buffer[..n]);
-
-        match parse_request_header_easy(&request_bytes) {
-            Err(e) => return Err(io::Error::other(e)),
-            Ok(None) => {},
-            Ok(Some((request, _))) => {
-                break request;
-            }
-        }
-    };
+    let (request, _) = read_http_request(&mut socket).await?;
 
     match request.uri().path() {
         "/" | "/index.html" => {
