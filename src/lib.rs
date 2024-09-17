@@ -21,7 +21,7 @@ pub async fn read_http_request(socket: &mut TcpStream) -> io::Result<(Request<()
 		match parse_request_header_easy(&request_bytes) {
 			Err(e) => break Err(io::Error::other(e)),
 			Ok(None) => {},
-			Ok(Some((request, remaining_bytes))) => {
+			Ok(Some((request, _))) => {
 				break Ok((request, request_bytes));
 			}
 		}
