@@ -1,5 +1,5 @@
 use http_bytes::{http::{Response, StatusCode}, response_header_to_vec};
-use http_load_balancer::read_http_request;
+use http_load_balancer::read_http_request_header;
 use std::env;
 use std::io;
 use tokio::io::AsyncWriteExt;
@@ -43,7 +43,7 @@ async fn main() -> io::Result<()> {
 }
 
 async fn handle_client(mut socket: TcpStream, listen_addr: &str) -> io::Result<()> {
-    let (request, _) = read_http_request(&mut socket).await?;
+    let (request, _) = read_http_request_header(&mut socket).await?;
 
     match request.uri().path() {
         "/" | "/index.html" => {

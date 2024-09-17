@@ -1,5 +1,5 @@
 use core::net::SocketAddr;
-use http_load_balancer::read_http_request;
+use http_load_balancer::{read_http_request_header, read_http_response_header};
 use std::{collections::HashMap, env, io};
 use std::sync::{Arc, Mutex};
 use http_bytes::http::{HeaderMap, HeaderValue};
@@ -50,7 +50,7 @@ async fn main() -> io::Result<()> {
         let db = db.clone();
 
         tokio::spawn(async move {
-            let (request, bytes) = match read_http_request(&mut socket).await {
+            let (request, bytes) = match read_http_request_header(&mut socket).await {
                 Err(e) => {
                     println!("[L] Failed to read HTTP request header. {:?}", e);
                     return;
@@ -83,7 +83,7 @@ async fn main() -> io::Result<()> {
                 }
             };
 
-            if let Err(e) = handle_client(socket, client_address, server_address, &bytes).await {
+            if let Err(e) = handle_client(socket, client_address, server_address, &bytes, db).await {
                 println!("[L] Failed to connect client {} to server {}. {:?}",
                          client_address,
                          server_address,
@@ -126,11 +126,21 @@ async fn handle_client(
     client_addr: SocketAddr,
     server_addr: SocketAddr,
     request_bytes: &[u8],
+    db: Arc<Mutex<HashMap<String, SocketAddr>>>,
 ) -> io::Result<(u64, u64)> {
     let mut server_socket = TcpStream::connect(server_addr).await?;
     println!("[L] Connected client at {} to server at {}.", client_addr, server_addr);
 
     server_socket.write_all(request_bytes).await?;
+
+    let (response, bytes) = read_http_response_header(&mut server_socket).await?;
+
+    if let Some(id) = get_session_id(response.headers(), "Set-Cookie") {
+        let mut sessions = db.lock().unwrap();
+        sessions.insert(id.to_string(), server_addr);
+    }
+
+    client_socket.write_all(bytes.as_slice()).await?;
 
     tokio::io::copy_bidirectional(&mut client_socket, &mut server_socket).await
 }
