@@ -87,7 +87,7 @@ impl Server {
 				let sesh_id = match sesh_id {
 					Some(id) => id.to_string(),
 					None => {
-						let new_id = format!("{:#034}", random::<u32>());
+						let new_id = format!("{:#08}", random::<u32>());
 						response_header = response_header.header(
 							"Set-Cookie",
 							format!("sessionID={}", new_id)
