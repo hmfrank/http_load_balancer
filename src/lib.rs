@@ -1,5 +1,7 @@
+mod load_balancer;
 mod server;
 
+pub use load_balancer::LoadBalancer;
 pub use server::Server;
 
 use http_bytes::{

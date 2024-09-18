@@ -1,12 +1,6 @@
+use http_load_balancer::LoadBalancer;
 use core::net::SocketAddr;
-use http_load_balancer::{
-    get_session_id,
-    read_http_request_header, read_http_response_header
-};
-use std::{collections::HashMap, env, io};
-use std::sync::{Arc, Mutex};
-use tokio::io::AsyncWriteExt;
-use tokio::net::{TcpListener, TcpStream};
+use std::{env, io};
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
@@ -27,110 +21,7 @@ async fn main() -> io::Result<()> {
         return Ok(());
     }
     let lb_addr = lb_addr.unwrap();
-    let db = Arc::new(Mutex::new(HashMap::<String, SocketAddr>::new()));
-
-
-    let listener = TcpListener::bind(&lb_addr).await?;
-    println!("[L] Listening on {}", lb_addr);
-
-    let next_server_index = Arc::new(Mutex::new(0));
-
-    loop {
-        let (mut socket, client_address) = match listener.accept().await {
-            Err(e) => {
-                println!("[L] Failed to accept client. {:?}", e);
-                continue;
-            }
-            Ok((s, addr)) => {
-                println!("[L] New connection to {}", addr);
-                (s, addr)
-            }
-        };
-
-        let next_server_index = next_server_index.clone();
-        let server_addrs = server_addrs.clone(); // TODO: use reference
-        let db = db.clone();
-
-        tokio::spawn(async move {
-            let (request, bytes) = match read_http_request_header(&mut socket).await {
-                Err(e) => {
-                    println!("[L] Failed to read HTTP request header. {:?}", e);
-                    return;
-                }
-                Ok(x) => x,
-            };
-
-            let mut create_db_entry = None;
-            let server_address = match get_session_id(
-                    request.headers(),
-                    "Cookie"
-                ) {
-                    Some(id) => {
-                        let sessions = db.lock().unwrap();
-
-                        if sessions.contains_key(id) {
-                            Some(sessions[id])
-                        } else {
-                            create_db_entry = Some(id);
-                            None
-                        }
-                    }
-                    None => None,
-                };
-            let server_address = match server_address {
-                Some(addr) => {
-                    println!("[L] Assigned client at {} to server at {} (sticky session).",
-                        client_address, addr
-                    );
-                    addr
-                },
-                None => {
-                    let mut index = next_server_index.lock().unwrap();
-                    let addr = server_addrs[*index];
-                    *index = (*index + 1) % server_addrs.len();
-                    println!("[L] Assigned client at {} to server at {} (round robin).",
-                        client_address, addr
-                    );
-                    addr
-                }
-            };
-
-            if let Some(id) = create_db_entry {
-                let mut sessions = db.lock().unwrap();
-                sessions.insert(id.to_string(), server_address);
-                println!("[L] Unknown session ID. Added sticky session to DB: {} -> {}", id, server_address);
-            }
-
-            if let Err(e) = handle_client(socket, server_address, &bytes, db).await {
-                println!("[L] Failed to connect client {} to server {}. {:?}",
-                         client_address,
-                         server_address,
-                         e
-                );
-            }
-        });
-    }
-}
-
-async fn handle_client(
-    mut client_socket: TcpStream,
-    server_addr: SocketAddr,
-    request_bytes: &[u8],
-    db: Arc<Mutex<HashMap<String, SocketAddr>>>,
-) -> io::Result<(u64, u64)> {
-    let mut server_socket = TcpStream::connect(server_addr).await?;
-
-    server_socket.write_all(request_bytes).await?;
-
-    let (response, bytes) = read_http_response_header(&mut server_socket).await?;
-
-    if let Some(id) = get_session_id(response.headers(), "Set-Cookie") {
-        let mut sessions = db.lock().unwrap();
-        sessions.insert(id.to_string(), server_addr);
-        println!("[L] Added sticky session to DB: {} -> {}", id, server_addr);
-    }
-
-    client_socket.write_all(bytes.as_slice()).await?;
-
-    tokio::io::copy_bidirectional(&mut client_socket, &mut server_socket).await
+    
+    let load_balancer = LoadBalancer::new(lb_addr, &server_addrs, true).unwrap();
+    load_balancer.run().await
 }
