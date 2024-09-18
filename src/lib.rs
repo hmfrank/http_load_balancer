@@ -7,16 +7,20 @@ use std::io;
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
 
-trait RequestOrResponse {}
 
+trait RequestOrResponse {}
 impl<T> RequestOrResponse for Request<T> {}
 impl<T> RequestOrResponse for Response<T> {}
 
 
+/// Extracts the session ID from an HTTP header map.
+///
+/// `header_name` specifies the header to search for, usually "Cookie" or "Set-Cookie".
 pub fn get_session_id<'a, 'b>(
 	headers: &'a HeaderMap<HeaderValue>,
 	header_name: &'b str
 ) -> Option<&'a str> {
+	// iterate over all header with name `header_name`
 	for header_val in headers.get_all(header_name).iter() {
 		let header_val = match header_val.to_str() {
 			Ok(val) => val,
@@ -25,6 +29,7 @@ pub fn get_session_id<'a, 'b>(
 			}
 		};
 
+		// search for a cookie called "sessionID"
 		for cookie in header_val.split(";").map(|s| s.trim()) {
 			if let Some(index) = cookie.find("=") {
 				let name = &cookie[0..index];
@@ -40,11 +45,17 @@ pub fn get_session_id<'a, 'b>(
 	None
 }
 
+/// Reads from a socket until a complete HTTP request header was received.
+///
+/// Returns the parsed header and all the bytes read, so far.
 pub async fn read_http_request_header(socket: &mut TcpStream)
 	-> io::Result<(Request<()>, Vec<u8>)> {
 	read_http_header::<Request<()>>(socket, parse_request_header_easy).await
 }
 
+/// Reads from a socket until a complete HTTP response header was received.
+///
+/// Returns the parsed header and all the bytes read, so far.
 pub async fn read_http_response_header(socket: &mut TcpStream)
 									  -> io::Result<(Response<()>, Vec<u8>)> {
 	read_http_header::<Response<()>>(socket, parse_response_header_easy).await
@@ -57,7 +68,7 @@ async fn read_http_header<R: RequestOrResponse>(
 	-> io::Result<(R, Vec<u8>)> {
 
 	let mut buffer = vec![0; 4096];
-	let mut request_bytes = vec![];
+	let mut received_bytes = vec![];
 
 	loop {
 		let n = socket.read(buffer.as_mut_slice()).await?;
@@ -68,13 +79,13 @@ async fn read_http_header<R: RequestOrResponse>(
 			));
 		}
 
-		request_bytes.extend_from_slice(&buffer[..n]);
+		received_bytes.extend_from_slice(&buffer[..n]);
 
-		match parse_fn(&request_bytes) {
+		match parse_fn(&received_bytes) {
 			Err(e) => break Err(io::Error::other(e)),
 			Ok(None) => {},
 			Ok(Some((request, _))) => {
-				break Ok((request, request_bytes));
+				break Ok((request, received_bytes));
 			}
 		}
 	}
