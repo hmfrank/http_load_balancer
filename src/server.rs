@@ -65,13 +65,13 @@ impl Server {
 				socket.write_all(
 					&format!(
 						"<html>\n\
-                        <head>\n\
-                            <title>{}</title>\n\
-                        </head>\n\
-                        <body>\n\
-                            Hello from {}.\n\
-                        </body>\n\
-                    </html>\n",
+							<head>\n\
+								<title>{}</title>\n\
+							</head>\n\
+							<body>\n\
+								Hello from {}.\n\
+							</body>\n\
+						</html>\n",
 						listen_addr,
 						listen_addr,
 					)
@@ -102,15 +102,15 @@ impl Server {
 				socket.write_all(
 					&format!(
 						"<html>\n\
-                        <head>\n\
-                            <title>{}</title>\n\
-                        </head>\n\
-                        <body>\n\
-                            Hello from {}.<br>\n\
-                            {}\
-                            Your session ID is: {}.\n\
-                        </body>\n\
-                    </html>\n",
+							<head>\n\
+								<title>{}</title>\n\
+							</head>\n\
+							<body>\n\
+								Hello from {}.<br>\n\
+								{}\
+								Your session ID is: {}.\n\
+							</body>\n\
+						</html>\n",
 						listen_addr,
 						listen_addr,
 						match set_cookie {
@@ -131,13 +131,13 @@ impl Server {
 				socket.write_all(
 					&format!(
 						"<html>\n\
-                        <head>\n\
-                            <title>{}</title>\n\
-                        </head>\n\
-                        <body>\n\
-                            <img alt=\"404 NOT FOUND\" src=\"https://http.cat/images/404.jpg\">\n\
-                        </body>\n\
-                    </html>\n",
+							<head>\n\
+								<title>{}</title>\n\
+							</head>\n\
+							<body>\n\
+								<img alt=\"404 NOT FOUND\" src=\"https://http.cat/images/404.jpg\">\n\
+							</body>\n\
+						</html>\n",
 						listen_addr,
 					)
 						.into_bytes()
