@@ -13,23 +13,23 @@ use tokio::net::{TcpListener, TcpStream};
 pub struct LoadBalancer {
 	/// Bind address of the load balancer.
 	address: SocketAddr,
-	
+
 	/// Stores sticky connections (session ID --> server address)
 	db: Arc<Mutex<HashMap<String, SocketAddr>>>,
-	
+
 	/// List of available servers.
 	servers: Vec<SocketAddr>,
-	
+
 	/// Index of the server to use for the next connection.
 	next_server_index: Arc<Mutex<usize>>,
-	
+
 	/// If true, status messages will be printed to stdout.
 	verbose: bool
 }
 
 impl LoadBalancer {
 	/// Creates a new load balancer.
-	/// 
+	///
 	/// `server_addrs` must contain at least 1 element, otherwise `None` will be returned.
 	pub fn new(address: SocketAddr, server_addrs: &[SocketAddr], verbose: bool) -> Option<Self> {
 		if server_addrs.len() == 0 {
@@ -44,7 +44,7 @@ impl LoadBalancer {
 			})
 		}
 	}
-	
+
 	pub async fn run(&self) -> io::Result<()> {
 		let listener = TcpListener::bind(&self.address).await?;
 		if self.verbose { println!("[L] Listening on {}", self.address); }
@@ -82,7 +82,7 @@ impl LoadBalancer {
 				// choose server to connect to
 				let server_address = {
 					let mut create_db_entry = None;
-					
+
 					// choose server based on session ID
 					let server_address = match get_session_id(
 						request.headers(),
@@ -100,7 +100,7 @@ impl LoadBalancer {
 						}
 						None => None,
 					};
-					
+
 					// use round-robin if no session ID was found
 					let server_address = match server_address {
 						Some(addr) => {
@@ -130,7 +130,7 @@ impl LoadBalancer {
 					if let Some(id) = create_db_entry {
 						let mut db = db.lock().unwrap();
 						db.insert(id.to_string(), server_address);
-						
+
 						if verbose {
 							println!(
 								"[L] Unknown session ID. Added sticky session to DB: {} -> {}",
@@ -138,7 +138,7 @@ impl LoadBalancer {
 							);
 						}
 					}
-					
+
 					server_address
 				};
 
@@ -156,7 +156,7 @@ impl LoadBalancer {
 			});
 		}
 	}
-	
+
 	async fn handle_client(
 		mut client_socket: TcpStream,
 		server_address: SocketAddr,
@@ -171,7 +171,7 @@ impl LoadBalancer {
 		server_socket.write_all(received_bytes).await?;
 
 		// wait for response header
-		let (response, recevied_bytes) = read_http_response_header(
+		let (response, received_bytes) = read_http_response_header(
 			&mut server_socket
 		).await?;
 
@@ -179,18 +179,18 @@ impl LoadBalancer {
 		if let Some(id) = get_session_id(response.headers(), "Set-Cookie") {
 			let mut db = db.lock().unwrap();
 			db.insert(id.to_string(), server_address);
-			
+
 			if verbose {
 				println!("[L] Added sticky session to DB: {} -> {}", id, server_address);
 			}
 		}
 
 		// send already received bytes
-		client_socket.write_all(recevied_bytes.as_slice()).await?;
+		client_socket.write_all(received_bytes.as_slice()).await?;
 
 		// forward the rest of the communication
 		tokio::io::copy_bidirectional(&mut client_socket, &mut server_socket).await?;
-		
+
 		Ok(())
 	}
 }

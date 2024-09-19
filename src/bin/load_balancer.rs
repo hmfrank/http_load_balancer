@@ -21,7 +21,7 @@ async fn main() -> io::Result<()> {
         return Ok(());
     }
     let lb_addr = lb_addr.unwrap();
-    
+
     let load_balancer = LoadBalancer::new(lb_addr, &server_addrs, true).unwrap();
     load_balancer.run().await
 }

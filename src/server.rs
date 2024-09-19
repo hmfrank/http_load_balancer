@@ -8,7 +8,7 @@ use tokio::net::{TcpListener, TcpStream};
 pub struct Server {
 	/// Server address to listen to.
 	address: String,
-	
+
 	/// If true, status messages will be printed to stdout.
 	verbose: bool,
 }
